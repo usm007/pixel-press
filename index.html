@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixel Press — exact file size optimizer &amp; cropper</title>
+<style>
+  :root {
+    --primary: #e8590c;
+    --primary-container: #ffd6a5;
+    --secondary-container: #ffe8d1;
+    --surface: #fff9f3;
+    --card: #ffffff;
+    --field: #f5ebe1;
+    --on-surface: #221a14;
+    --on-variant: #6b5d52;
+    --outline: #dec4ae;
+    --ok: #2e7d32;
+    --ok-bg: #e8f5e9;
+    --err: #b3261e;
+    --err-bg: #fdecea;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--surface);
+    background-image: radial-gradient(#e3d9cc 1px, transparent 1px);
+    background-size: 22px 22px;
+    color: var(--on-surface);
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  header { background: var(--card); border-bottom: 1px solid var(--outline); padding: 10px 20px; flex: none; }
+  .bar { margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+  .logo { width: 36px; height: 36px; border-radius: 10px; flex: none; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; }
+  .logo svg { width: 21px; height: 21px; }
+  .bar h1 { font-size: 17px; font-weight: 800; margin: 0; }
+  .bar p { font-size: 12px; color: var(--on-variant); margin: 1px 0 0; }
+  .privacy { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--ok); background: var(--ok-bg); border-radius: 999px; padding: 6px 14px; white-space: nowrap; }
+  main { width: 100%; margin: 0 auto; flex: 1; min-height: 0; padding: 14px 20px; display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; overflow: hidden; }
+  .card { background: var(--card); border-radius: 16px; padding: 16px; box-shadow: 0 1px 3px rgba(60, 40, 20, .08); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .col { display: flex; flex-direction: column; gap: 14px; min-height: 0; overflow: hidden; }
+  .card.grow { flex: 1; }
+  .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; flex: none; }
+  .numbadge { width: 26px; height: 26px; border-radius: 50%; flex: none; background: var(--field); color: var(--on-variant); font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .card-head h2 { font-size: 15px; font-weight: 700; margin: 0; }
+  .card-head .tag { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--on-variant); background: var(--field); padding: 4px 10px; border-radius: 7px; white-space: nowrap; }
+  .sub { font-size: 12px; color: var(--on-variant); margin: 0 0 12px 36px; flex: none; }
+  .sub:empty { display: none; }
+  /* studio dropzone */
+  #drop { flex: 1; min-height: 0; border: 1.5px dashed #a89c90; border-radius: 12px; background: #fbf9f5; cursor: pointer; display: flex; overflow: hidden; }
+  #drop:hover, #drop.over { border-color: var(--primary); background: var(--primary-container); }
+  #emptyState { margin: auto; text-align: center; padding: 20px; }
+  #emptyState .eic { width: 52px; height: 52px; border-radius: 50%; background: var(--secondary-container); color: var(--primary); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 10px; }
+  #emptyState .eic svg { width: 26px; height: 26px; }
+  #emptyState b { display: block; font-size: 15px; }
+  #emptyState span { font-size: 12px; color: var(--on-variant); display: block; max-width: 300px; margin: 4px auto 0; }
+  #stageWrap { flex: 1; min-height: 0; display: none; align-items: center; justify-content: center; overflow: hidden; }
+  #stageWrap.on { display: flex; }
+  #stageWrap.on ~ #emptyState, #emptyState.off { display: none; }
+  #cv { max-width: 100%; max-height: 100%; width: auto; height: auto; border-radius: 8px; cursor: crosshair; touch-action: none; }
+  #file { display: none; }
+  .toolbar { display: none; align-items: center; gap: 4px; margin-top: 8px; flex: none; }
+  .toolbar.on { display: flex; }
+  #cropInfo { font-size: 12px; color: var(--on-variant); }
+  /* controls */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .field > label { display: block; font-size: 12px; font-weight: 600; color: var(--on-variant); margin-bottom: 6px; }
+  .num { display: flex; align-items: center; gap: 6px; background: var(--field); border: 1.5px solid transparent; border-radius: 10px; padding: 2px 12px; }
+  .num:focus-within { background: var(--card); border-color: var(--primary); }
+  .num input { font: inherit; font-size: 15px; font-weight: 700; background: transparent; border: none; outline: none; width: 100%; min-width: 0; padding: 8px 0; color: inherit; }
+  .num input::placeholder { color: #a89c90; font-weight: 500; }
+  .field > label .res-note { font-weight: 500; }
+  .num select { font: inherit; font-size: 14px; font-weight: 600; background: transparent; border: none; outline: none; width: 100%; padding: 9px 0; color: inherit; cursor: pointer; }
+  .num .u { font-size: 11.5px; color: var(--on-variant); font-weight: 600; }
+  .dims { display: flex; gap: 8px; align-items: center; }
+  .dims .num { flex: 1; min-width: 0; max-width: none; }
+  .dims .dx { color: var(--on-variant); font-weight: 700; }
+  .seg { display: inline-flex; border: 1px solid var(--outline); border-radius: 999px; overflow: hidden; background: var(--card); }
+  .seg button { font: inherit; font-size: 13px; font-weight: 500; background: transparent; border: none; padding: 9px 16px; cursor: pointer; color: var(--on-surface); }
+  .seg button + button { border-left: 1px solid var(--outline); }
+  .seg button[aria-pressed="true"] { background: var(--secondary-container); font-weight: 700; }
+  .seg-wrap { padding-top: 22px; }
+  .note { font-size: 11.5px; color: var(--on-variant); margin: 6px 0 0; }
+  /* buttons */
+  .btn { font: inherit; cursor: pointer; border-radius: 10px; transition: transform .08s ease; }
+  .btn:active { transform: scale(.98); }
+  .btn-go { width: 100%; border: none; background: var(--primary); color: #fff; font-size: 14.5px; font-weight: 700; padding: 13px; margin-top: 2px; flex: none; }
+  .btn-go:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-text { background: transparent; border: none; color: var(--primary); font-size: 13px; font-weight: 600; padding: 8px 10px; border-radius: 8px; }
+  .btn-out { width: 100%; background: transparent; border: 1.5px solid var(--outline); color: var(--primary); font-size: 14px; font-weight: 600; padding: 11px; margin-top: 8px; display: none; text-decoration: none; text-align: center; flex: none; }
+  .btn-out.show { display: block; }
+  /* evaluation */
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; flex: none; }
+  .stat { border: 1px solid var(--outline); border-radius: 10px; padding: 8px 12px; }
+  .stat small { display: block; font-size: 10px; font-weight: 700; letter-spacing: .4px; color: var(--on-variant); }
+  .stat b { font-size: 17px; }
+  #bar-track { height: 3px; border-radius: 2px; background: var(--field); overflow: hidden; opacity: 0; margin-bottom: 8px; flex: none; }
+  #bar-track.on { opacity: 1; }
+  #bar { height: 100%; width: 35%; background: var(--primary); border-radius: 2px; animation: slide 1.1s ease-in-out infinite; }
+  @keyframes slide { from { margin-left: -35%; } to { margin-left: 100%; } }
+  #log { font-size: 12.5px; color: var(--on-variant); margin: 0 0 8px; flex: none; }
+  #log.ok { color: var(--ok); font-weight: 600; }
+  #log.over { color: var(--err); font-weight: 600; }
+  .compare { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; overflow: hidden; }
+  .compare:not(:has(#after[src])) { display: none; }
+  .compare figure { margin: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: 10px; background: var(--field); }
+  .compare img { display: none; max-width: 100%; object-fit: contain; margin: auto; flex: 1; min-height: 0; }
+  .compare img[src] { display: block; }
+  .compare figcaption { flex: none; font-size: 10.5px; font-weight: 700; letter-spacing: .4px; color: var(--on-variant); text-align: center; padding: 5px 4px; background: var(--card); border-top: 1px solid var(--outline); }
+  body[data-mode="bulk"] #resultEmpty { display: none; }
+  #outSize { font-size: 17px; }
+  .hidden-select { display: none; }
+  /* bulk mode */
+  #bulkPick { display: none; }
+  body[data-mode="bulk"] #bulkPick { display: block; }
+  #bulkList { display: none; flex: 1; min-height: 0; overflow-y: auto; flex-direction: column; gap: 8px; margin-top: 10px; }
+  body[data-mode="bulk"] #bulkList { display: flex; }
+  body[data-mode="bulk"] #drop { display: none; }
+  body[data-mode="bulk"] #clear { display: none; }
+  body[data-mode="bulk"] #go { display: none; }
+  .brow { display: flex; gap: 8px; align-items: center; border: 1px solid var(--outline); border-radius: 10px; padding: 8px 12px; font-size: 12.5px; flex: none; background: var(--card); }
+  .brow .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .brow .sz { color: var(--on-variant); white-space: nowrap; }
+  .brow .st { font-weight: 700; white-space: nowrap; }
+  .brow .st-ok { color: var(--ok); }
+  .brow .st-over { color: var(--err); }
+  .brow a { color: var(--primary); font-weight: 700; white-space: nowrap; }
+  .mode-seg button { padding: 7px 14px; font-size: 12.5px; }
+  /* size presets */
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: -2px 0 12px; }
+  .presets button { border: 1px solid var(--outline); background: var(--card); color: var(--on-surface); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+  .presets button.on { background: var(--secondary-container); border-color: transparent; }
+  .presets .pu { font-size: 11px; color: var(--on-variant); }
+  /* edit tools */
+  .tbtn { border: 1px solid var(--outline); background: var(--card); color: var(--on-surface); border-radius: 8px; min-width: 36px; height: 34px; font-size: 15px; font-weight: 700; cursor: pointer; padding: 0 8px; }
+  .tbtn:hover { background: var(--field); }
+  #editbar { gap: 8px; flex-wrap: wrap; }
+  #editbar .st { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--on-variant); font-weight: 600; }
+  #editbar input[type="range"] { accent-color: var(--primary); width: 110px; }
+  body[data-mode="bulk"] #editbar { display: none; }
+  @media (max-width: 640px) {
+    .privacy { display: none; }
+    main { grid-template-columns: 1fr 1fr; padding: 8px; gap: 8px; }
+    .card { padding: 10px; }
+  }
+  .result-empty { flex: 1; min-height: 90px; border: 1.5px dashed var(--outline); border-radius: 10px; color: var(--on-variant); font-size: 12.5px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; }
+  .result-empty.off { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <span class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/><circle cx="12" cy="12" r="4"/></svg>
+    </span>
+    <div>
+      <h1>Pixel Press</h1>
+      <p>Client-side exact file size optimizer &amp; cropper</p>
+    </div>
+    <span class="seg mode-seg" role="group" aria-label="Mode" id="modeSeg">
+      <button type="button" data-v="single" aria-pressed="true">Single</button>
+      <button type="button" data-v="bulk" aria-pressed="false">Bulk</button>
+    </span>
+    <span class="privacy">100% Private · Zero uploads</span>
+  </div>
+</header>
+<main>
+  <section class="card">
+    <div class="card-head"><span class="numbadge">1</span><h2>Studio Canvas</h2></div>
+    <p class="sub" id="srcInfo">Drop or pick an image to begin</p>
+    <div id="drop" role="button" tabindex="0" aria-label="Choose an image file">
+      <div id="emptyState">
+        <span class="eic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m5 19 5.5-5.5 3 3 3.5-3.5L21 17"/></svg></span>
+        <b>Select or Drop Image Here</b>
+        <span>Supports high-res JPG, PNG, WebP or BMP. File never leaves your machine.</span>
+      </div>
+      <div id="stageWrap"><canvas id="cv"></canvas></div>
+    </div>
+    <input type="file" id="file" accept="image/*">
+    <button class="btn btn-out" id="bulkPick">Choose images</button>
+    <div id="bulkList"></div>
+    <div class="toolbar" id="toolbar">
+      <button class="btn btn-text" id="clear">Clear crop</button>
+      <span id="cropInfo"></span>
+      <button class="btn btn-text" id="removeBtn" style="margin-left:auto;display:none">✕ Remove image</button>
+    </div>
+    <div class="toolbar" id="editbar">
+      <button class="tbtn" id="rotL" title="Rotate left">↺</button>
+      <button class="tbtn" id="rotR" title="Rotate right">↻</button>
+      <button class="tbtn" id="flipH" title="Flip horizontal">Flip H</button>
+      <button class="tbtn" id="flipV" title="Flip vertical">Flip V</button>
+      <span class="st">Straighten <input type="range" id="stRange" min="-45" max="45" step="1" value="0"><b id="stDeg">0°</b></span>
+    </div>
+  </section>
+
+  <div class="col">
+    <section class="card">
+      <div class="card-head"><h2>Target File Size</h2><span class="tag">Binary-search exact match</span></div>
+      <div class="grid2">
+        <div class="field">
+          <label for="target">Max Size</label>
+          <span class="num"><input type="number" id="target" value="50" min="1"><span class="u" id="unitSuffix">KB</span></span>
+        </div>
+        <div class="field">
+          <label>Unit</label>
+          <span class="seg" role="group" aria-label="Size unit" id="unitSeg">
+            <button type="button" data-v="KB" aria-pressed="true">KB</button>
+            <button type="button" data-v="MB" aria-pressed="false">MB</button>
+          </span>
+        </div>
+      </div>
+      <div class="presets" id="sizePresets" role="group" aria-label="Size presets">
+        <button type="button" data-v="20">20</button>
+        <button type="button" data-v="50">50</button>
+        <button type="button" data-v="100">100</button>
+        <button type="button" data-v="110">110</button>
+        <button type="button" data-v="150">150</button>
+        <button type="button" data-v="200">200</button>
+        <span class="pu">KB · or type custom</span>
+      </div>
+      <div class="field">
+        <label>Output Format</label>
+        <span class="seg" role="group" aria-label="Output format" id="fmtSeg">
+          <button type="button" data-v="image/jpeg" aria-pressed="true">JPEG</button>
+          <button type="button" data-v="image/webp" aria-pressed="false">WebP</button>
+          <button type="button" data-v="image/png" aria-pressed="false">PNG</button>
+        </span>
+      </div>
+      <div class="field" style="margin-bottom:6px">
+        <label>Resolution <span class="res-note" id="origRes">· Original: —</span></label>
+        <div class="dims">
+          <span class="num"><input type="number" id="resW" min="1" placeholder="Width"><span class="u">px</span></span>
+          <span class="dx">×</span>
+          <span class="num"><input type="number" id="resH" min="1" placeholder="Height"><span class="u">px</span></span>
+        </div>
+      </div>
+      <p class="note">PNG is kept lossless when it fits — otherwise auto-converted to JPEG to hit your target.</p>
+      <button class="btn btn-go" id="go" disabled>Compress to Exact Target</button>
+      <select id="unit" class="hidden-select" aria-hidden="true"><option value="KB" selected>KB</option><option value="MB">MB</option></select>
+      <select id="fmt" class="hidden-select" aria-hidden="true"><option value="image/jpeg" selected>JPEG</option><option value="image/webp">WebP</option><option value="image/png">PNG</option></select>
+    </section>
+
+    <section class="card grow">
+      <div class="card-head"><h2>Output Evaluation</h2><span class="tag" id="outSizeHead">Awaiting file</span></div>
+      <div class="stats">
+        <div class="stat"><small>TARGET CEILING</small><b id="targetCeiling">50 KB</b></div>
+        <div class="stat"><small>RESULT SIZE</small><b id="outSize">—</b></div>
+      </div>
+      <div id="bar-track"><div id="bar"></div></div>
+      <p id="log">Upload an image and adjust target specifications.</p>
+      <div class="result-empty" id="resultEmpty">Compressed preview and download appear here</div>
+      <div class="compare" id="compareBox">
+        <figure><img id="before" alt="Input preview"><figcaption>INPUT</figcaption></figure>
+        <figure><img id="after" alt="Compressed result preview"><figcaption>OUTPUT</figcaption></figure>
+      </div>
+      <a class="btn btn-out" id="dl">Download</a>
+    </section>
+  </div>
+</main>
+<script>
+// Exact-target compressor (binary-search quality + shrink fallback).
+// browser-image-compression's maxSizeMB is best-effort and PNG ignores
+// quality, which is why 50KB came out as 96KB. This guarantees <= target
+// for JPEG/WebP. Same approach as alefduarte/image-resize-compress.
+const encode = (c, type, q) => new Promise((res, rej) => c.toBlob((b) => b ? res(b) : rej(new Error('encode failed')), type, q));
+
+// Magic-byte sniffing: file.type / extension can lie, so detect the real format.
+// Never silently accept an unsupported conversion: unknown types are rejected.
+async function sniffImage(file) {
+  const KNOWN = { 'image/png': 1, 'image/jpeg': 1, 'image/webp': 1, 'image/bmp': 1, 'image/gif': 1 };
+  let mime = '';
+  try {
+    const buf = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+    const is = (...s) => buf.length >= s.length && s.every((b, i) => buf[i] === b);
+    if (is(0x89, 0x50, 0x4E, 0x47)) mime = 'image/png';
+    else if (is(0xFF, 0xD8, 0xFF)) mime = 'image/jpeg';
+    else if (is(0x52, 0x49, 0x46, 0x46) && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) mime = 'image/webp';
+    else if (is(0x42, 0x4D)) mime = 'image/bmp';
+    else if (is(0x47, 0x49, 0x46, 0x38)) mime = 'image/gif';
+  } catch (e) { mime = ''; }
+  if (!mime) mime = file.type || '';
+  if (mime && !KNOWN[mime]) return { mime, error: `Unsupported input format (${mime}). Use JPG, PNG, WebP, BMP or GIF.` };
+  const lossless = mime === 'image/png' || mime === 'image/bmp' || mime === 'image/gif';
+  return { mime: mime || file.type || 'unknown', lossless };
+}
+
+// Refuse a blob whose real type is not what was requested (some browsers
+// silently fall back to PNG when they cannot encode WebP).
+function expectType(b, type) {
+  if (b.type && b.type !== type) throw new Error(`Encoder returned ${b.type} instead of ${type}: conversion unsupported in this browser`);
+  return b;
+}
+
+async function lossySearch(srcCanvas, targetBytes, type, onStep) {
+  let w = srcCanvas.width, h = srcCanvas.height;
+  for (let round = 0; round < 6; round++) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(srcCanvas, 0, 0, w, h);
+    let lo = 0.05, hi = 0.95, best = null;
+    for (let i = 0; i < 7; i++) {
+      const q = (lo + hi) / 2;
+      const b = await encode(c, type, q);
+      onStep && onStep(round, i, b.size);
+      if (b.size <= targetBytes) { best = b; lo = q; } else hi = q;
+      if (hi - lo < 0.02) break;
+    }
+    if (best) return { blob: best };
+    w = Math.round(w * 0.85); h = Math.round(h * 0.85); // quality floor hit: shrink and retry
+  }
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  c.getContext('2d').drawImage(srcCanvas, 0, 0, w, h);
+  return { blob: await encode(c, type, 0.05), smallest: true };
+}
+
+async function compressToTarget(srcCanvas, targetBytes, type, onStep) {
+  if (type === 'image/png') {
+    // Smart PNG: lossless wins when it fits; otherwise convert to JPEG internally to honor the target.
+    const lossless = await encode(srcCanvas, type);
+    if (lossless.size <= targetBytes) return { blob: expectType(lossless, type), note: '' };
+    const flat = document.createElement('canvas');
+    flat.width = srcCanvas.width; flat.height = srcCanvas.height;
+    const fx = flat.getContext('2d');
+    fx.fillStyle = '#ffffff'; fx.fillRect(0, 0, flat.width, flat.height); // white matte for the JPEG fallback
+    fx.drawImage(srcCanvas, 0, 0);
+    const fb = await lossySearch(flat, targetBytes, 'image/jpeg', onStep);
+    return { blob: fb.blob, note: `lossless PNG is ${(lossless.size / 1024).toFixed(1)} KB (over target) — auto-converted to JPEG` };
+  }
+  const r = await lossySearch(srcCanvas, targetBytes, type, onStep);
+  if (r.smallest) return { blob: r.blob, note: 'target unreachable: returned smallest possible' };
+  return { blob: r.blob };
+}
+
+const $ = (s) => document.querySelector(s);
+const cv = $('#cv'), ctx = cv.getContext('2d');
+let img = null, fileName = 'image', sel = null, start = null, dispScale = 1;
+let bulkMode = false;
+let bulkURLs = [];
+
+$('#file').addEventListener('change', (e) => {
+  const picked = Array.from(e.target.files || []);
+  if (!picked.length) return;
+  if (bulkMode || picked.length > 1) {
+    if (!bulkMode) setMode(true); // multiple files picked in single mode: switch to bulk
+    runBulk(picked);
+    return;
+  }
+  const f = picked[0];
+  fileName = f.name || 'image';
+  const url = URL.createObjectURL(f);
+  img = new Image();
+  img.onload = async () => {
+    URL.revokeObjectURL(url); sel = null;
+    let det = null;
+    try { det = await sniffImage(f); } catch (e) { det = null; }
+    if (det && det.error) { $('#srcInfo').textContent = det.error; return; } // unsupported input: never proceed silently
+    draw();
+    $('#stageWrap').classList.add('on'); $('#emptyState').classList.add('off');
+    $('#removeBtn').style.display = 'inline';
+    $('#toolbar').classList.add('on');
+    $('#editbar').classList.add('on');
+    $('#drop').style.cursor = 'default';
+    $('#go').disabled = false;
+    const d = det && det.mime ? `Detected ${det.mime}${det.lossless ? ' (lossless)' : ''} · ` : '';
+    $('#srcInfo').textContent = `${d}${fileName} · ${img.naturalWidth} × ${img.naturalHeight} · ${(f.size / 1024).toFixed(1)} KB`;
+    $('#origRes').textContent = `· Original: ${img.naturalWidth} × ${img.naturalHeight} px — blank keeps it`;
+    $('#resW').placeholder = img.naturalWidth;
+    $('#resH').placeholder = img.naturalHeight;
+    setLog('Image ready. Drag to crop, then compress.', '');
+  };
+  img.src = url;
+  img.onerror = () => { URL.revokeObjectURL(url); $('#srcInfo').textContent = 'Could not decode this file as an image.'; };
+});
+
+function draw() {
+  if (!img) return;
+  const wrap = document.getElementById('stageWrap');
+  const ww = wrap.clientWidth || 600, wh = wrap.clientHeight || 600;
+  dispScale = Math.min(1, ww / img.naturalWidth, wh / img.naturalHeight); // exact fit: no letterbox, mapping stays exact
+  cv.width = Math.round(img.naturalWidth * dispScale);
+  cv.height = Math.round(img.naturalHeight * dispScale);
+  ctx.drawImage(img, 0, 0, cv.width, cv.height);
+  if (sel) {
+    const [x, y, w, h] = [sel.x * dispScale, sel.y * dispScale, sel.w * dispScale, sel.h * dispScale];
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(img, sel.x, sel.y, sel.w, sel.h, x, y, w, h);
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 5; ctx.strokeRect(x, y, w, h);
+    ctx.strokeStyle = '#e8590c'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
+    $('#cropInfo').textContent = `crop ${sel.w}×${sel.h} at (${sel.x}, ${sel.y})`;
+  } else $('#cropInfo').textContent = 'full image';
+}
+function pos(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * cv.width / r.width / dispScale, y: (e.clientY - r.top) * cv.height / r.height / dispScale }; }
+cv.addEventListener('pointerdown', (e) => { if (!img) return; const p = pos(e); start = p; sel = { x: Math.round(p.x), y: Math.round(p.y), w: 0, h: 0 }; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointermove', (e) => { if (!start) return; const p = pos(e); sel = { x: Math.round(Math.min(start.x, p.x)), y: Math.round(Math.min(start.y, p.y)), w: Math.round(Math.abs(p.x - start.x)), h: Math.round(Math.abs(p.y - start.y)) }; draw(); });
+cv.addEventListener('pointerup', () => { start = null; if (sel && (sel.w < 2 || sel.h < 2)) sel = null; draw(); });
+$('#clear').addEventListener('click', () => { sel = null; draw(); });
+
+// Edit tools: bake transforms into the working image (lossless PNG intermediate),
+// so crop mapping and the compression pipeline stay untouched.
+const imgW = (im) => im.naturalWidth || im.width;
+const imgH = (im) => im.naturalHeight || im.height;
+function canvasToImage(c) {
+  return new Promise((res, rej) => {
+    c.toBlob((b) => {
+      if (!b) return rej(new Error('edit failed'));
+      const u = URL.createObjectURL(b);
+      const im = new Image();
+      im.onload = () => { URL.revokeObjectURL(u); res(im); };
+      im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('edit failed')); };
+      im.src = u;
+    }, 'image/png');
+  });
+}
+async function swapImage(im) {
+  img = im; sel = null; draw();
+  $('#srcInfo').textContent = `${fileName} · ${imgW(img)} × ${imgH(img)} (edited)`;
+  $('#origRes').textContent = `· Original: ${imgW(img)} × ${imgH(img)} px — blank keeps it`;
+  $('#resW').placeholder = imgW(img);
+  $('#resH').placeholder = imgH(img);
+  setLog('Edit applied. Drag to crop, then compress.', '');
+}
+async function bakeEdit(fn) {
+  if (!img) return;
+  try {
+    const w = imgW(img), h = imgH(img);
+    const c = fn(w, h);
+    await swapImage(await canvasToImage(c));
+  } catch (err) { setLog('Error: ' + err.message, 'over'); }
+}
+function rotCanvas(w, h, deg) {
+  const square = Math.abs(deg) === 90;
+  const c = document.createElement('canvas');
+  c.width = square ? h : w; c.height = square ? w : h;
+  const x = c.getContext('2d');
+  x.translate(c.width / 2, c.height / 2);
+  x.rotate(deg * Math.PI / 180);
+  x.drawImage(img, -w / 2, -h / 2);
+  return c;
+}
+$('#rotL').addEventListener('click', () => bakeEdit((w, h) => rotCanvas(w, h, -90)));
+$('#rotR').addEventListener('click', () => bakeEdit((w, h) => rotCanvas(w, h, 90)));
+$('#flipH').addEventListener('click', () => bakeEdit((w, h) => {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d'); x.translate(w, 0); x.scale(-1, 1); x.drawImage(img, 0, 0);
+  return c;
+}));
+$('#flipV').addEventListener('click', () => bakeEdit((w, h) => {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d'); x.translate(0, h); x.scale(1, -1); x.drawImage(img, 0, 0);
+  return c;
+}));
+$('#stRange').addEventListener('input', (e) => { $('#stDeg').textContent = `${e.target.value}°`; });
+$('#stRange').addEventListener('change', (e) => {
+  const deg = parseFloat(e.target.value);
+  e.target.value = '0'; $('#stDeg').textContent = '0°';
+  if (!deg) return;
+  bakeEdit((w, h) => {
+    const rad = deg * Math.PI / 180, cos = Math.abs(Math.cos(rad)), sin = Math.abs(Math.sin(rad));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * cos + h * sin));
+    c.height = Math.max(1, Math.round(w * sin + h * cos));
+    const x = c.getContext('2d');
+    x.translate(c.width / 2, c.height / 2);
+    x.rotate(rad);
+    x.drawImage(img, -w / 2, -h / 2);
+    return c;
+  });
+});
+
+function clearImage() {
+  img = null; sel = null; start = null;
+  $('#file').value = '';
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  $('#stageWrap').classList.remove('on'); $('#emptyState').classList.remove('off');
+  $('#removeBtn').style.display = 'none';
+  $('#toolbar').classList.remove('on');
+  $('#editbar').classList.remove('on');
+  $('#removeBtn').style.display = 'none';
+  $('#drop').style.cursor = 'pointer';
+  $('#go').disabled = true;
+  $('#srcInfo').textContent = 'Drop or pick an image to begin';
+  $('#origRes').textContent = '· Original: —';
+  $('#resW').value = ''; $('#resH').value = '';
+  $('#resW').placeholder = 'Width'; $('#resH').placeholder = 'Height';
+  $('#cropInfo').textContent = '';
+  $('#outSize').textContent = '—'; $('#outSizeHead').textContent = 'Awaiting file';
+  setLog('Upload an image and adjust target specifications.', '');
+  $('#before').removeAttribute('src');
+  $('#after').removeAttribute('src');
+  $('#resultEmpty').classList.remove('off');
+  $('#dl').classList.remove('show');
+  bulkURLs.forEach((u) => { try { URL.revokeObjectURL(u); } catch (e) {} });
+  bulkURLs = [];
+  const bl = $('#bulkList'); if (bl) bl.innerHTML = '';
+}
+
+function setLog(text, cls) {
+  const log = $('#log');
+  log.textContent = text;
+  log.className = cls || '';
+}
+
+// Shared single/bulk pipeline: detect input, fit inside typed W×H (blank = original),
+// matte transparent inputs for JPEG, binary-search quality, verify output MIME.
+async function processImage(src, sx, sy, sw, sh, file, outBase, onStep) {
+  const n = parseFloat($('#target').value);
+  if (!(n > 0)) throw new Error('Enter a target size greater than 0.');
+  const targetBytes = Math.round($('#unit').value === 'MB' ? n * 1024 * 1024 : n * 1024);
+  const type = $('#fmt').value; // explicit user choice: JPEG, WebP or PNG
+  const inDet = await sniffImage(file).catch(() => null);
+  if (inDet && inDet.error) throw new Error(inDet.error);
+  const inMime = (inDet && inDet.mime) || file.type || 'unknown type';
+  const wasLossless = !!(inDet && inDet.lossless);
+  const rw = parseFloat($('#resW').value), rh = parseFloat($('#resH').value);
+  let scale0 = 1;
+  if (rw > 0 && rh > 0) scale0 = Math.min(1, rw / sw, rh / sh);
+  else if (rw > 0) scale0 = Math.min(1, rw / sw);
+  else if (rh > 0) scale0 = Math.min(1, rh / sh);
+  const base = document.createElement('canvas');
+  base.width = Math.max(1, Math.round(sw * scale0));
+  base.height = Math.max(1, Math.round(sh * scale0));
+  const bctx = base.getContext('2d');
+  if (type === 'image/jpeg') { bctx.fillStyle = '#ffffff'; bctx.fillRect(0, 0, base.width, base.height); } // white matte for transparent inputs
+  // drawImage copies already-oriented pixels with a uniform scale: aspect ratio and orientation preserved
+  bctx.drawImage(src, sx, sy, sw, sh, 0, 0, base.width, base.height);
+  const inputURL = base.toDataURL('image/png'); // what actually went into the encoder
+  const { blob: b, note } = await compressToTarget(base, targetBytes, type, onStep);
+  const finalType = b.type || type; // smart fallback may have converted PNG → JPEG internally
+  const allowed = !b.type || b.type === type || (type === 'image/png' && b.type === 'image/jpeg');
+  if (!allowed) throw new Error(`Encoder returned ${b.type} instead of ${type}: conversion unsupported in this browser`);
+  const convMsg = `${inMime} → ${finalType}${wasLossless && finalType !== 'image/png' ? ' (lossless auto-converted)' : ''}; `;
+  const ext = finalType === 'image/webp' ? '.webp' : finalType === 'image/png' ? '.png' : '.jpeg';
+  const out = new File([b], 'compressed-' + outBase.replace(/\.\w+$/, '') + ext, { type: finalType });
+  return { out, ok: out.size <= targetBytes, note, convMsg, targetBytes, inputURL };
+}
+
+// Decode a file to a drawable source, honoring EXIF orientation where supported.
+function loadBitmap(file) {
+  const viaImg = () => {
+    const url = URL.createObjectURL(file);
+    return new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => {
+        URL.revokeObjectURL(url);
+        const c = document.createElement('canvas');
+        c.width = im.naturalWidth; c.height = im.naturalHeight;
+        c.getContext('2d').drawImage(im, 0, 0);
+        res(c);
+      };
+      im.onerror = () => { URL.revokeObjectURL(url); rej(new Error('Could not decode this file as an image.')); };
+      im.src = url;
+    });
+  };
+  if ('createImageBitmap' in window) {
+    try { return createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => viaImg()); }
+    catch (e) { /* fall through */ }
+  }
+  return viaImg();
+}
+
+function bulkRow(name) {
+  const div = document.createElement('div');
+  div.className = 'brow';
+  const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = name;
+  const sz = document.createElement('span'); sz.className = 'sz'; sz.textContent = '…';
+  const st = document.createElement('span'); st.className = 'st';
+  div.append(nm, sz, st);
+  $('#bulkList').appendChild(div);
+  return div;
+}
+
+async function runBulk(files) {
+  clearImage();
+  if (!files.length) return;
+  $('#bar-track').classList.add('on');
+  let totalIn = 0, totalOut = 0, fit = 0;
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    $('#srcInfo').textContent = `Bulk ${i + 1}/${files.length} · ${f.name}`;
+    $('#outSizeHead').textContent = `Bulk ${i}/${files.length}`;
+    const row = bulkRow(f.name);
+    try {
+      const src = await loadBitmap(f);
+      const { out, ok } = await processImage(src, 0, 0, src.width, src.height, f, f.name, null);
+      if (src.close) src.close();
+      totalIn += f.size; totalOut += out.size; if (ok) fit++;
+      const url = URL.createObjectURL(out); bulkURLs.push(url);
+      row.querySelector('.sz').textContent = `${(f.size / 1024).toFixed(1)} → ${(out.size / 1024).toFixed(1)} KB`;
+      const st = row.querySelector('.st'); st.textContent = ok ? 'fits' : 'over'; st.className = 'st ' + (ok ? 'st-ok' : 'st-over');
+      const a = document.createElement('a'); a.href = url; a.download = out.name; a.textContent = 'Save'; row.appendChild(a);
+    } catch (err) {
+      row.querySelector('.sz').textContent = 'failed';
+      const st = row.querySelector('.st'); st.textContent = 'error'; st.className = 'st st-over';
+      row.title = err.message;
+    }
+  }
+  $('#bar-track').classList.remove('on');
+  $('#srcInfo').textContent = `Bulk done: ${files.length} files · ${(totalIn / 1024).toFixed(0)} → ${(totalOut / 1024).toFixed(0)} KB total`;
+  $('#outSize').textContent = `${(totalOut / 1024).toFixed(1)} KB`;
+  $('#outSizeHead').textContent = `${fit}/${files.length} fit`;
+  setLog(`Bulk done: ${fit}/${files.length} fit target. Per-file downloads are in the list.`, fit === files.length ? 'ok' : 'over');
+  $('#removeBtn').style.display = 'inline';
+  $('#toolbar').classList.add('on');
+}
+
+function setMode(bulk) {
+  bulkMode = bulk;
+  document.body.dataset.mode = bulk ? 'bulk' : 'single';
+  $('#file').multiple = bulk;
+  document.querySelectorAll('#modeSeg button').forEach((x) => x.setAttribute('aria-pressed', x.dataset.v === (bulk ? 'bulk' : 'single') ? 'true' : 'false'));
+  clearImage();
+  $('#srcInfo').textContent = bulk ? 'Pick multiple images to begin' : 'Drop or pick an image to begin';
+}
+
+$('#go').addEventListener('click', async () => {
+  $('#bar-track').classList.add('on');
+  $('#outSizeHead').textContent = 'Working…';
+  setLog('Compressing…', '');
+  const tN = parseFloat($('#target').value);
+  const tB = Math.round(($('#unit').value === 'MB' ? tN * 1024 * 1024 : tN * 1024) || 0);
+  try {
+    const sx = sel ? sel.x : 0, sy = sel ? sel.y : 0;
+    const sw = sel ? sel.w : img.naturalWidth, sh = sel ? sel.h : img.naturalHeight;
+    const { out, ok, note, convMsg, targetBytes, inputURL } = await processImage(img, sx, sy, sw, sh, $('#file').files[0], fileName,
+      (r, i, size) => setLog(`Working… pass ${r + 1}.${i + 1}: ${(size / 1024).toFixed(1)} KB (target ${(tB / 1024).toFixed(1)} KB)`, ''));
+    setLog(`${convMsg}${(out.size / 1024).toFixed(1)} KB (target ${(targetBytes / 1024).toFixed(1)} KB) — ${ok ? 'fits target' : 'over target'}${note ? ' · ' + note : ''}`, ok ? 'ok' : 'over');
+    $('#outSize').textContent = `${(out.size / 1024).toFixed(1)} KB`;
+    $('#outSizeHead').textContent = ok ? 'Fits target' : 'Over target';
+    $('#before').src = inputURL;
+    $('#after').src = URL.createObjectURL(out);
+    $('#resultEmpty').classList.add('off');
+    const dl = $('#dl'); dl.classList.add('show');
+    dl.href = URL.createObjectURL(out);
+    dl.download = out.name;
+    dl.textContent = 'Download ' + dl.download;
+  } catch (err) { setLog('Error: ' + err.message, 'over'); $('#outSizeHead').textContent = 'Error'; }
+  finally { $('#bar-track').classList.remove('on'); }
+});
+</script>
+<script>
+// Page chrome: segmented controls, dropzone, ceiling readout. No compression logic here.
+(function () {
+  const updCeil = () => {
+    document.getElementById('targetCeiling').textContent =
+      `${document.getElementById('target').value || '—'} ${document.getElementById('unit').value}`;
+  };
+  const bindSeg = (segId, selectId, extra) => {
+    const seg = document.getElementById(segId), sel = document.getElementById(selectId);
+    seg.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      sel.value = b.dataset.v;
+      seg.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'));
+      if (extra) extra(b.dataset.v);
+    });
+  };
+  const presetBox = document.getElementById('sizePresets');
+  const markPreset = (v) => presetBox.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.v === String(v)));
+  const setKB = () => {
+    document.getElementById('unit').value = 'KB';
+    document.querySelectorAll('#unitSeg button').forEach((x) => x.setAttribute('aria-pressed', x.dataset.v === 'KB' ? 'true' : 'false'));
+    document.getElementById('unitSuffix').textContent = 'KB';
+  };
+  presetBox.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    document.getElementById('target').value = b.dataset.v;
+    setKB(); updCeil(); markPreset(b.dataset.v);
+  });
+  bindSeg('unitSeg', 'unit', (v) => { document.getElementById('unitSuffix').textContent = v; updCeil(); markPreset(v === 'KB' ? document.getElementById('target').value : ''); });
+  bindSeg('fmtSeg', 'fmt');
+  document.getElementById('target').addEventListener('input', () => { updCeil(); markPreset(document.getElementById('target').value); });
+  updCeil(); markPreset(document.getElementById('target').value);
+  const drop = document.getElementById('drop'), input = document.getElementById('file');
+  drop.addEventListener('click', () => { if (!img) input.click(); }); // canvas clicks never reopen the picker
+  drop.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && !img) { e.preventDefault(); input.click(); } });
+  ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', (e) => {
+    if (img) return; // only allow a new image after removing the current one
+    if (e.dataTransfer.files.length) { input.files = e.dataTransfer.files; input.dispatchEvent(new Event('change')); }
+  });
+  document.getElementById('removeBtn').addEventListener('click', (e) => { e.stopPropagation(); clearImage(); });
+  document.getElementById('modeSeg').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    setMode(b.dataset.v === 'bulk');
+  });
+  document.getElementById('bulkPick').addEventListener('click', () => input.click());
+  const bl = document.getElementById('bulkList');
+  ['dragenter', 'dragover'].forEach((t) => bl.addEventListener(t, (e) => { e.preventDefault(); }));
+  bl.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer.files.length) runBulk(Array.from(e.dataTransfer.files));
+  });
+  window.addEventListener('resize', () => { try { if (img) draw(); } catch (e) {} }); // keep canvas fitted: page never scrolls
+})();
+</script>
+</body>
+</html>
