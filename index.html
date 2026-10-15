@@ -252,6 +252,7 @@
           <button type="button" data-v="image/jpeg" aria-pressed="true">JPEG</button>
           <button type="button" data-v="image/webp" aria-pressed="false">WebP</button>
           <button type="button" data-v="image/png" aria-pressed="false">PNG</button>
+          <button type="button" data-v="application/pdf" aria-pressed="false">PDF</button>
         </span>
       </div>
       <div class="field" style="margin-bottom:6px">
@@ -262,10 +263,10 @@
           <span class="num"><input type="number" id="resH" min="1" placeholder="Height"><span class="u">px</span></span>
         </div>
       </div>
-      <p class="note">PNG is kept lossless when it fits — otherwise auto-converted to JPEG to hit your target.</p>
+      <p class="note">PNG is kept lossless when it fits — otherwise auto-converted to JPEG to hit your target. PDF wraps the JPEG in a single page.</p>
       <button class="btn btn-go" id="go" disabled>Compress to Exact Target</button>
       <select id="unit" class="hidden-select" aria-hidden="true"><option value="KB" selected>KB</option><option value="MB">MB</option></select>
-      <select id="fmt" class="hidden-select" aria-hidden="true"><option value="image/jpeg" selected>JPEG</option><option value="image/webp">WebP</option><option value="image/png">PNG</option></select>
+      <select id="fmt" class="hidden-select" aria-hidden="true"><option value="image/jpeg" selected>JPEG</option><option value="image/webp">WebP</option><option value="image/png">PNG</option><option value="application/pdf">PDF</option></select>
     </section>
 
     <section class="card grow">
@@ -680,13 +681,46 @@ function setLog(text, cls) {
   log.className = cls || '';
 }
 
+// Minimal single-page PDF writer: embeds JPEG bytes as an image XObject (DCTDecode).
+// No dependencies; page size = image pixels (viewers fit-to-page on print).
+function concatBytes(...arrs) {
+  const total = arrs.reduce((n, a) => n + a.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const a of arrs) { out.set(a, o); o += a.length; }
+  return out;
+}
+function buildPdf(jpegBytes, w, h) {
+  const enc = new TextEncoder();
+  const parts = [];
+  let pos = 0;
+  const push = (d) => { parts.push(d); pos += d.length; };
+  push(enc.encode('%PDF-1.4\n'));
+  const content = enc.encode(`q\n${w} 0 0 ${h} 0 0 cm\n/Im0 Do\nQ\n`);
+  const objs = [
+    enc.encode('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n'),
+    enc.encode('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n'),
+    enc.encode(`3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w} ${h}] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>\nendobj\n`),
+    concatBytes(enc.encode(`4 0 obj\n<< /Length ${content.length} >>\nstream\n`), content, enc.encode('\nendstream\nendobj\n')),
+    concatBytes(enc.encode(`5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`), jpegBytes, enc.encode('\nendstream\nendobj\n')),
+  ];
+  const offsets = objs.map((o) => { const at = pos; push(o); return at; });
+  const xrefAt = pos;
+  let xref = 'xref\n0 6\n0000000000 65535 f \n';
+  for (const at of offsets) xref += String(at).padStart(10, '0') + ' 00000 n \n';
+  push(enc.encode(xref));
+  push(enc.encode(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF`));
+  return new Blob(parts, { type: 'application/pdf' });
+}
+
 // Shared single/bulk pipeline: detect input, fit inside typed W×H (blank = original),
 // matte transparent inputs for JPEG, binary-search quality, verify output MIME.
 async function processImage(src, sx, sy, sw, sh, file, outBase, onStep) {
   const n = parseFloat($('#target').value);
   if (!(n > 0)) throw new Error('Enter a target size greater than 0.');
   const targetBytes = Math.round($('#unit').value === 'MB' ? n * 1024 * 1024 : n * 1024);
-  const type = $('#fmt').value; // explicit user choice: JPEG, WebP or PNG
+  const type = $('#fmt').value; // explicit user choice: JPEG, WebP, PNG or PDF
+  const encType = type === 'application/pdf' ? 'image/jpeg' : type; // PDF wraps the compressed JPEG
   const inDet = await sniffImage(file).catch(() => null);
   if (inDet && inDet.error) throw new Error(inDet.error);
   const inMime = (inDet && inDet.mime) || file.type || 'unknown type';
@@ -700,18 +734,24 @@ async function processImage(src, sx, sy, sw, sh, file, outBase, onStep) {
   base.width = Math.max(1, Math.round(sw * scale0));
   base.height = Math.max(1, Math.round(sh * scale0));
   const bctx = base.getContext('2d');
-  if (type === 'image/jpeg') { bctx.fillStyle = '#ffffff'; bctx.fillRect(0, 0, base.width, base.height); } // white matte for transparent inputs
+  if (encType === 'image/jpeg') { bctx.fillStyle = '#ffffff'; bctx.fillRect(0, 0, base.width, base.height); } // white matte for transparent inputs
   // drawImage copies already-oriented pixels with a uniform scale: aspect ratio and orientation preserved
   bctx.drawImage(src, sx, sy, sw, sh, 0, 0, base.width, base.height);
   const inputURL = base.toDataURL('image/png'); // what actually went into the encoder
-  const { blob: b, note } = await compressToTarget(base, targetBytes, type, onStep);
-  const finalType = b.type || type; // smart fallback may have converted PNG → JPEG internally
-  const allowed = !b.type || b.type === type || (type === 'image/png' && b.type === 'image/jpeg');
-  if (!allowed) throw new Error(`Encoder returned ${b.type} instead of ${type}: conversion unsupported in this browser`);
+  const encTarget = type === 'application/pdf' ? Math.max(1024, targetBytes - 2048) : targetBytes; // reserve PDF wrapper overhead
+  const { blob: b, note } = await compressToTarget(base, encTarget, encType, onStep);
+  expectType(b, encType); // verify actual output MIME before saving
+  let finalBlob = b, finalType = b.type || encType, extraNote = '';
+  if (type === 'application/pdf') {
+    finalBlob = buildPdf(new Uint8Array(await b.arrayBuffer()), base.width, base.height);
+    finalType = 'application/pdf';
+    extraNote = 'single-page PDF';
+  }
+  const notes = [note, extraNote].filter(Boolean).join(' · ');
   const convMsg = `${inMime} → ${finalType}${wasLossless && finalType !== 'image/png' ? ' (lossless auto-converted)' : ''}; `;
-  const ext = finalType === 'image/webp' ? '.webp' : finalType === 'image/png' ? '.png' : '.jpeg';
-  const out = new File([b], 'compressed-' + outBase.replace(/\.\w+$/, '') + ext, { type: finalType });
-  return { out, ok: out.size <= targetBytes, note, convMsg, targetBytes, inputURL };
+  const ext = finalType === 'application/pdf' ? '.pdf' : finalType === 'image/webp' ? '.webp' : finalType === 'image/png' ? '.png' : '.jpeg';
+  const out = new File([finalBlob], 'compressed-' + outBase.replace(/\.\w+$/, '') + ext, { type: finalType });
+  return { out, ok: out.size <= targetBytes, note: notes, convMsg, targetBytes, inputURL, previewBlob: b };
 }
 
 // Decode a file to a drawable source, honoring EXIF orientation where supported.
@@ -801,13 +841,13 @@ $('#go').addEventListener('click', async () => {
   try {
     const sx = sel ? sel.x : 0, sy = sel ? sel.y : 0;
     const sw = sel ? sel.w : img.naturalWidth, sh = sel ? sel.h : img.naturalHeight;
-    const { out, ok, note, convMsg, targetBytes, inputURL } = await processImage(img, sx, sy, sw, sh, $('#file').files[0], fileName,
+    const { out, ok, note, convMsg, targetBytes, inputURL, previewBlob } = await processImage(img, sx, sy, sw, sh, $('#file').files[0], fileName,
       (r, i, size) => setLog(`Working… pass ${r + 1}.${i + 1}: ${(size / 1024).toFixed(1)} KB (target ${(tB / 1024).toFixed(1)} KB)`, ''));
     setLog(`${convMsg}${(out.size / 1024).toFixed(1)} KB (target ${(targetBytes / 1024).toFixed(1)} KB) — ${ok ? 'fits target' : 'over target'}${note ? ' · ' + note : ''}`, ok ? 'ok' : 'over');
     $('#outSize').textContent = `${(out.size / 1024).toFixed(1)} KB`;
     $('#outSizeHead').textContent = ok ? 'Fits target' : 'Over target';
     $('#before').src = inputURL;
-    $('#after').src = URL.createObjectURL(out);
+    $('#after').src = URL.createObjectURL(previewBlob); // preview shows page content even for PDF output
     $('#resultEmpty').classList.add('off');
     const dl = $('#dl'); dl.classList.add('show');
     dl.href = URL.createObjectURL(out);
